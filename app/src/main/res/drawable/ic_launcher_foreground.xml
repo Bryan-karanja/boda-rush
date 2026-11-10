@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- road -->
+    <path android:fillColor="#24262D" android:pathData="M46,26 L62,26 L84,90 L24,90 Z" />
+    <path android:fillColor="#F6D21E" android:pathData="M61,26 L62,26 L84,90 L81,90 Z" />
+    <path android:fillColor="#E9E6DC" android:pathData="M46,26 L47,26 L27,90 L24,90 Z" />
+    <path android:fillColor="#D7D3C8" android:pathData="M53.3,30 L54.7,30 L55,38 L53,38 Z" />
+    <path android:fillColor="#D7D3C8" android:pathData="M53,44 L55,44 L55.5,54 L52.5,54 Z" />
+    <!-- headlight beam -->
+    <path android:fillColor="#55FFF4D6" android:pathData="M51,62 L57,62 L66,34 L42,34 Z" />
+    <!-- bike: wheels, handlebar, body -->
+    <path android:fillColor="#111111" android:pathData="M52,58 h4 v8 h-4 z M52,80 h4 v8 h-4 z" />
+    <path android:fillColor="#B8BCC6" android:pathData="M44,64 h20 v3 h-20 z" />
+    <!-- rider vest -->
+    <path android:fillColor="#C6FF1A" android:pathData="M46,68 h16 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-16 a4,4 0 0 1 -4,-4 v-6 a4,4 0 0 1 4,-4 z" />
+    <path android:fillColor="#C8C8C8" android:pathData="M42,74 h24 v2 h-24 z" />
+    <!-- helmet -->
+    <path android:fillColor="#F6D21E" android:pathData="M54,64 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+</vector>
