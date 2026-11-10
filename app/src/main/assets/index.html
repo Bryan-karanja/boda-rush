@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Thika Road Boda Rush</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: one full-screen night-ride canvas; HUD strips top, touch pads bottom, signage-style overlays for start/finish. */
+:root {
+  --asphalt: #15161b;
+  --night: #0b0c10;
+  --sodium: #ffb547;        /* streetlight orange, the accent */
+  --sign: #0f6b3f;          /* Kenyan road-sign green */
+  --sign-ink: #f4f6f2;
+  --psv: #f6d21e;           /* PSV yellow band */
+  --danger: #ff4d4d;
+  --muted: #a7a9b4;
+  --display: "Bungee", "Impact", "Arial Black", sans-serif;
+  --ui: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { background: var(--night); color: var(--sign-ink); font-family: var(--ui); overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none; }
+#app { position: relative; height: 100%; width: 100%; overflow: hidden; }
+canvas { display: block; width: 100%; height: 100%; }
+
+.hud { position: absolute; left: 0; right: 0; top: 0; padding: 10px max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); display: grid; gap: 8px; pointer-events: none; }
+.route { position: relative; height: 26px; }
+.route-line { position: absolute; left: 0; right: 0; top: 12px; height: 3px; background: rgba(255,255,255,.18); border-radius: 2px; }
+.route-fill { position: absolute; left: 0; top: 12px; height: 3px; background: var(--sodium); border-radius: 2px; width: 0; }
+.route-tick { position: absolute; top: 9px; width: 9px; height: 9px; margin-left: -4px; border-radius: 50%; background: var(--night); border: 2px solid rgba(255,255,255,.4); }
+.route-tick.passed { border-color: var(--sodium); background: var(--sodium); }
+.route-label { position: absolute; top: -2px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); transform: translateX(-50%); white-space: nowrap; }
+.route-label.end { transform: translateX(-100%); }
+.route-label.start { transform: none; }
+.route-bike { position: absolute; top: 5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--psv); box-shadow: 0 0 10px var(--psv); }
+
+.stats { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.stat { display: grid; gap: 0; min-width: 0; }
+.stat .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font-family: var(--display); font-size: clamp(16px, 4.4vw, 22px); white-space: nowrap; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.stat .v small { font-family: var(--ui); font-size: 13px; color: var(--muted); margin-left: 2px; }
+.fuel { width: clamp(48px, 14vw, 110px); height: 10px; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; margin-top: 6px; }
+.fuel i { display: block; height: 100%; width: 100%; background: var(--sodium); transition: width .2s; }
+.fuel.low i { background: var(--danger); }
+.lives { font-size: clamp(14px, 4vw, 20px); letter-spacing: 1px; margin-top: 2px; white-space: nowrap; }
+.next { justify-self: center; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.next b { color: var(--sign-ink); font-weight: 700; }
+
+.toast { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); font-family: var(--display); font-size: clamp(20px, 5vw, 34px); color: var(--psv); text-shadow: 0 3px 0 #000; pointer-events: none; opacity: 0; transition: opacity .25s; text-align: center; white-space: nowrap; }
+.toast.on { opacity: 1; }
+
+.pads { position: absolute; left: 0; right: 0; bottom: 0; display: none; justify-content: space-between; padding: 0 max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); pointer-events: none; }
+@media (pointer: coarse), (max-width: 700px) { .pads { display: flex; } }
+.pad-group { display: flex; gap: 12px; pointer-events: auto; }
+.pad { width: 68px; height: 68px; border-radius: 50%; border: 2px solid rgba(255,255,255,.28); background: rgba(20,22,28,.55); color: var(--sign-ink); font-family: var(--display); font-size: 22px; display: grid; place-items: center; touch-action: none; backdrop-filter: blur(4px); }
+.pad small { font-family: var(--ui); font-size: 12px; letter-spacing: .08em; }
+.pad.on { background: var(--sodium); color: #1b1200; border-color: var(--sodium); }
+.pad.gas { border-color: var(--sodium); }
+
+.overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(8,9,12,.72); padding: 24px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); overflow-y: auto; }
+.board { width: min(460px, 100%); background: var(--sign); border: 4px solid var(--sign-ink); border-radius: 10px; padding: 22px 22px 20px; box-shadow: 0 0 0 4px var(--sign), 0 20px 60px rgba(0,0,0,.6); display: grid; gap: 14px; text-align: left; }
+.board .eyebrow { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; opacity: .85; }
+.board h1 { font-family: var(--display); font-weight: 400; font-size: clamp(30px, 8vw, 44px); line-height: .95; margin: 0; text-wrap: balance; }
+.board h1 span { color: var(--psv); }
+.board p { margin: 0; font-size: 17px; line-height: 1.35; }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 16px; }
+.keys kbd { font-family: var(--ui); font-weight: 700; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.4); border-radius: 4px; padding: 0 6px; white-space: nowrap; }
+.results { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.results div { background: rgba(0,0,0,.22); border-radius: 6px; padding: 8px 10px; display: grid; }
+.results .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; opacity: .8; }
+.results .v { font-family: var(--display); font-size: 20px; font-variant-numeric: tabular-nums; }
+.btn { appearance: none; border: 0; border-radius: 6px; background: var(--psv); color: #1d1700; font-family: var(--display); font-size: 20px; padding: 12px 18px; cursor: pointer; }
+.btn:focus-visible, .pad:focus-visible { outline: 3px solid var(--sign-ink); outline-offset: 3px; }
+.btn:hover { filter: brightness(1.07); }
+.fine { font-size: 13px !important; opacity: .75; }
+.arrow { font-family: var(--display); }
+.pause-btn { position: absolute; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: 50px; height: 50px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(20,22,28,.6); color: var(--sign-ink); font-family: var(--display); font-size: 16px; display: grid; place-items: center; cursor: pointer; backdrop-filter: blur(4px); }
+.pause-btn:focus-visible { outline: 3px solid var(--sign-ink); outline-offset: 3px; }
+</style>
+
+<div id="app">
+  <canvas id="c"></canvas>
+
+  <div class="hud" id="hud">
+    <div class="route" id="route">
+      <div class="route-line"></div>
+      <div class="route-fill" id="routeFill"></div>
+      <div class="route-bike" id="routeBike"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="k">Speed</span><span class="v" id="speed">0<small>km/h</small></span></div>
+      <div class="stat"><span class="k">To Thika</span><span class="v" id="left">42.0<small>km</small></span></div>
+      <div class="stat"><span class="k">Fares</span><span class="v" id="cash">0<small>KSh</small></span></div>
+      <div class="stat"><span class="k">Fuel</span><div class="fuel" id="fuel"><i id="fuelBar"></i></div></div>
+      <div class="stat"><span class="k">Helmets</span><span class="lives" id="lives">⛑⛑⛑</span></div>
+    </div>
+    <div class="next" id="next">Next: <b>Pangani</b></div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <button class="pause-btn" id="pauseBtn" aria-label="Pause" hidden>II</button>
+
+  <div class="pads" id="pads">
+    <div class="pad-group">
+      <button class="pad" id="padL" aria-label="Steer left"><span class="arrow">◀</span></button>
+      <button class="pad" id="padR" aria-label="Steer right"><span class="arrow">▶</span></button>
+    </div>
+    <div class="pad-group">
+      <button class="pad" id="padB" aria-label="Brake"><small>BRAKE</small></button>
+      <button class="pad gas" id="padG" aria-label="Boost"><small>BOOST</small></button>
+    </div>
+  </div>
+
+  <div class="overlay" id="startScreen">
+    <div class="board">
+      <span class="eyebrow">A2 · Nairobi → Thika · 42 km</span>
+      <h1>Thika Road <span>Boda Rush</span></h1>
+      <p>Ride your boda boda up the superhighway from Globe Roundabout to Thika. Dodge matatus that swerve without warning, skip the potholes, pick up fares and keep the tank from running dry.</p>
+      <div class="keys">
+        <kbd>← →</kbd><span>Change lanes (or A / D)</span>
+        <kbd>↑</kbd><span>Boost to 140 km/h (or W)</span>
+        <kbd>↓</kbd><span>Brake (or S)</span>
+        <kbd>P</kbd><span>Pause (or the II button)</span>
+      </div>
+      <p class="fine">On a phone, use the buttons at the bottom of the screen.</p>
+      <button class="btn" id="startBtn">Ride to Thika</button>
+      <p class="fine" id="bestLine"></p>
+    </div>
+  </div>
+
+  <div class="overlay" id="endScreen" hidden>
+    <div class="board">
+      <span class="eyebrow" id="endEyebrow">Journey over</span>
+      <h1 id="endTitle">Out of fuel</h1>
+      <p id="endText"></p>
+      <div class="results">
+        <div><span class="k">Distance</span><span class="v" id="rDist">0 km</span></div>
+        <div><span class="k">Time</span><span class="v" id="rTime">0:00</span></div>
+        <div><span class="k">Fares</span><span class="v" id="rCash">0</span></div>
+      </div>
+      <button class="btn" id="againBtn">Ride again</button>
+      <p class="fine" id="endBest"></p>
+    </div>
+  </div>
+
+  <div class="overlay" id="pauseScreen" hidden>
+    <div class="board">
+      <span class="eyebrow">Stopped by the roadside</span>
+      <h1>Paused</h1>
+      <button class="btn" id="resumeBtn">Keep riding</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ---------- Route (approximate km from Globe Roundabout) ----------
+  const ROUTE = [
+    { km: 0,   name: "Globe" },
+    { km: 2,   name: "Pangani" },
+    { km: 4.5, name: "Muthaiga" },
+    { km: 6.5, name: "Allsops" },
+    { km: 9.5, name: "Roysambu · TRM" },
+    { km: 11,  name: "Kasarani" },
+    { km: 14,  name: "Githurai" },
+    { km: 17,  name: "Kenyatta Uni" },
+    { km: 22,  name: "Ruiru" },
+    { km: 30,  name: "Juja" },
+    { km: 42,  name: "Thika" },
+  ];
+  const TOTAL_KM = 42;
+  const MAX_SPEED = 140, CRUISE = 95, MIN_SPEED = 25;
+  const KM_PER_SPEED_SEC = 0.2 / 110;   // compresses the 42 km ride into about 3.5 minutes
+  const FUEL_PER_KM = 2.6;
+
+  const $ = id => document.getElementById(id);
+  const cv = $("c"), ctx = cv.getContext("2d");
+  let W = 0, H = 0, DPR = 1, road = {};
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const rw = Math.min(W * 0.86, 460);
+    road = { x: (W - rw) / 2, w: rw, lanes: 4, laneW: rw / 4 };
+    road.s = road.laneW / 62;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ---------- Route strip ----------
+  (function buildRoute() {
+    const r = $("route");
+    ROUTE.forEach((p, i) => {
+      const pct = p.km / TOTAL_KM * 100;
+      const t = document.createElement("div");
+      t.className = "route-tick"; t.style.left = pct + "%"; t.dataset.km = p.km; r.appendChild(t);
+      if (i === 0 || i === ROUTE.length - 1 || ["Roysambu · TRM", "Ruiru", "Juja"].includes(p.name)) {
+        const l = document.createElement("div");
+        l.className = "route-label" + (i === 0 ? " start" : i === ROUTE.length - 1 ? " end" : "");
+        l.style.left = pct + "%"; l.textContent = p.name === "Roysambu · TRM" ? "TRM" : p.name; r.appendChild(l);
+      }
+    });
+  })();
+
+  // ---------- Storage (best result; optional) ----------
+  function loadBest() { try { return JSON.parse(localStorage.getItem("thikaBest") || "null"); } catch (e) { return null; } }
+  function saveBest(b) { try { localStorage.setItem("thikaBest", JSON.stringify(b)); } catch (e) {} }
+  const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  function showBest() {
+    const b = loadBest();
+    $("bestLine").textContent = b ? `Your best: Thika in ${fmtTime(b.time)} with KSh ${b.cash} in fares.` : "";
+  }
+  showBest();
+
+  // ---------- Sound (starts after the first tap) ----------
+  let ac = null, engine = null, engineGain = null;
+  function initAudio() {
+    try {
+      ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+      if (!engine) {
+        engine = ac.createOscillator(); engine.type = "sawtooth";
+        const f = ac.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 420;
+        engineGain = ac.createGain(); engineGain.gain.value = 0;
+        engine.connect(f); f.connect(engineGain); engineGain.connect(ac.destination); engine.start();
+      }
+      ac.resume();
+    } catch (e) { ac = null; }
+  }
+  function beep(freq, dur, type = "square", vol = 0.08) {
+    if (!ac) return;
+    try {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = type; o.frequency.value = freq; g.gain.value = vol;
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+      o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+    } catch (e) {}
+  }
+
+  // ---------- Game state ----------
+  let S = null, running = false, paused = false, last = 0;
+  const input = { left: false, right: false, gas: false, brake: false };
+  const MATATU_COLORS = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#00b3b3", "#f032e6", "#1a1a1a", "#ffffff"];
+  const CAR_COLORS = ["#c9ccd3", "#2b2f3a", "#8a1c1c", "#24427a", "#e8e8e8", "#3f5d3a", "#6b6f78"];
+
+  function newGame() {
+    S = {
+      km: 0, time: 0, speed: 60, fuel: 100, cash: 0, lives: 3,
+      x: road.x + road.laneW * 2.5, vx: 0, inv: 0, shake: 0,
+      scroll: 0, ents: [], props: [], spawnT: 0.5, pickT: 2, holeT: 4, bridgeT: 3,
+      nextSign: 1, passed: 0, lean: 0,
+    };
+  }
+
+  function laneX(l) { return road.x + road.laneW * (l + 0.5); }
+  function pxPerSpeed() { return H * 1.15 / MAX_SPEED; }
+
+  function spawnVehicle() {
+    const r = Math.random(), s = road.s;
+    let v;
+    if (r < 0.42)      v = { kind: "matatu", w: 40 * s, h: 84 * s, speed: 55 + Math.random() * 45, color: pick(MATATU_COLORS), swerve: true };
+    else if (r < 0.72) v = { kind: "car", w: 34 * s, h: 62 * s, speed: 60 + Math.random() * 40, color: pick(CAR_COLORS) };
+    else if (r < 0.84) v = { kind: "truck", w: 46 * s, h: 128 * s, speed: 40 + Math.random() * 20, color: pick(["#d9822b", "#3b6ea8", "#b23a3a", "#e5e1d8"]) };
+    else if (r < 0.92) v = { kind: "bus", w: 46 * s, h: 132 * s, speed: 50 + Math.random() * 25, color: pick(["#2a4d9b", "#f2c230", "#c0392b"]) };
+    else               v = { kind: "boda", w: 14 * s, h: 34 * s, speed: 45 + Math.random() * 30, color: pick(["#d32f2f", "#1565c0", "#2e7d32"]) };
+    v.lane = Math.floor(Math.random() * road.lanes);
+    // Trucks and buses keep left (slow lanes are on the left in Kenya)
+    if (v.kind === "truck" || v.kind === "bus") v.lane = Math.random() < 0.7 ? 0 : 1;
+    v.x = laneX(v.lane);
+    const fromBehind = S.speed < v.speed - 10 && Math.random() < 0.5;
+    v.y = fromBehind ? H + v.h : -v.h - 20;
+    if (fromBehind && Math.abs(v.x - S.x) < road.laneW * 0.8) return; // never spawn straight into the rider
+    v.tx = v.x; v.swerveT = 1.5 + Math.random() * 4; v.type = "veh";
+    for (const e of S.ents) if (e.type === "veh" && Math.abs(e.x - v.x) < road.laneW * 0.7 && Math.abs(e.y - v.y) < (e.h + v.h) * 0.7 + 30) return;
+    S.ents.push(v);
+  }
+  function spawnPickup(kind) {
+    const lane = Math.floor(Math.random() * road.lanes);
+    S.ents.push({ type: kind, x: laneX(lane), y: -40, w: 26 * road.s, h: 26 * road.s, speed: 0 });
+  }
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+
+  function toast(msg, ms = 1100) {
+    const t = $("toast"); t.textContent = msg; t.classList.add("on");
+    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("on"), ms);
+  }
+
+  // ---------- Update ----------
+  function update(dt) {
+    S.time += dt;
+    // Speed
+    const target = input.brake ? MIN_SPEED : input.gas ? MAX_SPEED : CRUISE;
+    const rate = input.brake ? 120 : target > S.speed ? 38 : 30;
+    S.speed += Math.sign(target - S.speed) * Math.min(Math.abs(target - S.speed), rate * dt);
+    // Steering
+    const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    S.vx += steer * 1500 * road.s * dt;
+    S.vx *= Math.pow(0.0015, dt);
+    S.x += S.vx * dt;
+    S.lean = S.vx / (420 * road.s);
+    const minX = road.x + 10 * road.s, maxX = road.x + road.w - 10 * road.s;
+    if (S.x < minX) { S.x = minX; S.vx = 0; }
+    if (S.x > maxX) { S.x = maxX; S.vx = 0; }
+
+    // Distance and fuel
+    const dkm = S.speed * KM_PER_SPEED_SEC * dt;
+    S.km = Math.min(TOTAL_KM, S.km + dkm);
+    S.fuel = Math.max(0, S.fuel - dkm * FUEL_PER_KM * (S.speed > 120 ? 1.3 : 1));
+    S.scroll += S.speed * pxPerSpeed() * dt;
+    if (S.inv > 0) S.inv -= dt;
+    if (S.shake > 0) S.shake -= dt;
+
+    // Landmarks
+    while (S.passed + 1 < ROUTE.length && S.km >= ROUTE[S.passed + 1].km) {
+      S.passed++;
+      if (S.passed < ROUTE.length - 1) { toast(ROUTE[S.passed].name); beep(880, 0.12, "triangle", 0.05); }
+    }
+    // Overhead sign for the next landmark, shown slightly before reaching it
+    if (S.nextSign < ROUTE.length && S.km >= ROUTE[S.nextSign].km - 0.35) {
+      S.props.push({ kind: "gantry", y: -80, text: ROUTE[S.nextSign].name, dist: ROUTE[S.nextSign].km });
+      S.nextSign++;
+    }
+
+    // Spawning: traffic gets heavier around Roysambu to Githurai
+    const busy = (S.km > 8 && S.km < 18) ? 1.45 : 1 + S.km / 60;
+    S.spawnT -= dt * busy * (0.6 + S.speed / 140);
+    if (S.spawnT <= 0) { spawnVehicle(); S.spawnT = 0.55 + Math.random() * 0.75; }
+    S.pickT -= dt;
+    if (S.pickT <= 0) { spawnPickup(Math.random() < 0.38 ? "fuel" : "fare"); S.pickT = 2.2 + Math.random() * 2.8; }
+    S.holeT -= dt;
+    if (S.holeT <= 0) { spawnPickup("hole"); S.holeT = 3 + Math.random() * 4; }
+    S.bridgeT -= dt;
+    if (S.bridgeT <= 0) { S.props.push({ kind: "bridge", y: -60 }); S.bridgeT = 6 + Math.random() * 7; }
+
+    // Move entities
+    const k = pxPerSpeed();
+    for (const e of S.ents) {
+      e.y += (S.speed - e.speed) * k * dt;
+      if (e.swerve) {
+        e.swerveT -= dt;
+        if (e.swerveT <= 0 && e.y > -50 && e.y < H * 0.7) {
+          const nl = Math.max(0, Math.min(road.lanes - 1, e.lane + (Math.random() < 0.5 ? -1 : 1)));
+          const blocked = S.ents.some(o => o !== e && o.type === "veh" && Math.abs(o.x - laneX(nl)) < road.laneW * 0.6 && Math.abs(o.y - e.y) < (o.h + e.h) * 0.6);
+          if (!blocked) { e.lane = nl; e.tx = laneX(nl); e.blink = 0.8; }
+          e.swerveT = 2 + Math.random() * 4;
+        }
+        e.x += (e.tx - e.x) * Math.min(1, dt * 2.2);
+        if (e.blink > 0) e.blink -= dt;
+      }
+    }
+    for (const p of S.props) p.y += S.speed * k * dt;
+    S.ents = S.ents.filter(e => e.y < H + 200 && e.y > -400 && !e.dead);
+    S.props = S.props.filter(p => p.y < H + 200);
+
+    // Collisions
+    const py = H * 0.76, pw = 13 * road.s, ph = 30 * road.s;
+    for (const e of S.ents) {
+      if (Math.abs(e.x - S.x) > (e.w + pw) / 2 * 0.85 || Math.abs(e.y - py) > (e.h + ph) / 2 * 0.85) continue;
+      if (e.type === "fuel") { S.fuel = Math.min(100, S.fuel + 30); e.dead = true; toast("+ Fuel"); beep(660, 0.1, "triangle"); beep(990, 0.12, "triangle"); }
+      else if (e.type === "fare") { const f = pick([50, 50, 100, 100, 150, 200]); S.cash += f; e.dead = true; toast(`+ KSh ${f}`, 700); beep(1200, 0.08, "square", 0.05); }
+      else if (e.type === "hole" && S.inv <= 0) { e.dead = true; S.speed *= 0.55; S.shake = 0.35; S.vx += (Math.random() - 0.5) * 300 * road.s; toast("Pothole!", 700); beep(90, 0.2, "sawtooth", 0.1); }
+      else if (e.type === "veh" && S.inv <= 0) crash(e);
+    }
+
+    if (S.km >= TOTAL_KM) return end(true);
+    if (S.fuel <= 0) return end(false, "Out of fuel", "The tank ran dry before Thika. Grab more jerrycans on the next ride.");
+  }
+
+  function crash(e) {
+    S.lives--; S.inv = 2.2; S.shake = 0.6; S.speed = 30; S.vx = (S.x < e.x ? -1 : 1) * 380 * road.s;
+    beep(70, 0.45, "sawtooth", 0.16); beep(140, 0.25, "square", 0.08);
+    const who = { matatu: "a matatu", car: "a car", truck: "a lorry", bus: "a bus", boda: "another boda" }[e.kind];
+    toast(S.lives > 0 ? `Hit ${who}!` : "Crashed!", 1200);
+    if (navigator.vibrate) try { navigator.vibrate(150); } catch (err) {}
+    if (S.lives <= 0) end(false, "Crashed out", `You collided with ${who} near ${ROUTE[S.passed].name}. Keep an eye out for matatus switching lanes.`);
+  }
+
+  function end(won, title, text) {
+    running = false; $("pauseBtn").hidden = true;
+    if (engineGain) engineGain.gain.value = 0;
+    $("endEyebrow").textContent = won ? "Arrived · Thika Town" : `Stopped near ${ROUTE[S.passed].name}`;
+    $("endTitle").textContent = won ? "Karibu Thika!" : title;
+    $("endText").textContent = won ? "You made it from Globe Roundabout to Thika in one piece." : text;
+    $("rDist").textContent = S.km.toFixed(1) + " km";
+    $("rTime").textContent = fmtTime(S.time);
+    $("rCash").textContent = "KSh " + S.cash;
+    let bestMsg = "";
+    if (won) {
+      const b = loadBest();
+      if (!b || S.time < b.time) { saveBest({ time: S.time, cash: S.cash }); bestMsg = "New best time!"; }
+      else bestMsg = `Best time: ${fmtTime(b.time)}`;
+      beep(523, 0.15, "triangle"); setTimeout(() => beep(659, 0.15, "triangle"), 150); setTimeout(() => beep(784, 0.3, "triangle"), 300);
+    }
+    $("endBest").textContent = bestMsg;
+    $("endScreen").hidden = false;
+    showBest();
+  }
+
+  // ---------- Drawing ----------
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); }
+
+  function drawRoad() {
+    const s = road.s;
+    // Verges / service road
+    ctx.fillStyle = "#101116"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#1a1c22"; ctx.fillRect(road.x - 46 * s, 0, 46 * s, H);
+    // Grass and murram beyond
+    ctx.fillStyle = "#0f1a12"; ctx.fillRect(0, 0, Math.max(0, road.x - 46 * s), H);
+    ctx.fillStyle = "#1c1612"; ctx.fillRect(road.x + road.w + 34 * s, 0, W, H);
+    // Asphalt
+    ctx.fillStyle = "#24262d"; ctx.fillRect(road.x, 0, road.w, H);
+    // Edge lines
+    ctx.fillStyle = "#e9e6dc"; ctx.fillRect(road.x + 3 * s, 0, 3 * s, H);
+    ctx.fillStyle = "#f6d21e"; ctx.fillRect(road.x + road.w - 6 * s, 0, 3 * s, H);
+    // Lane dashes
+    const dash = 46 * s, gap = 54 * s, off = S ? S.scroll % (dash + gap) : 0;
+    ctx.fillStyle = "#d7d3c8";
+    for (let l = 1; l < road.lanes; l++) {
+      const x = road.x + road.laneW * l - 1.5 * s;
+      for (let y = -dash - gap + off; y < H; y += dash + gap) ctx.fillRect(x, y, 3 * s, dash);
+    }
+    // Median with jersey barrier on the right (oncoming carriageway beyond)
+    const mx = road.x + road.w;
+    ctx.fillStyle = "#3a3d45"; ctx.fillRect(mx, 0, 34 * s, H);
+    ctx.fillStyle = "#c9c5ba"; ctx.fillRect(mx + 13 * s, 0, 8 * s, H);
+    // Streetlights on the median
+    const sp = 260 * s, lo = S ? S.scroll % sp : 0;
+    for (let y = -sp + lo; y < H + sp; y += sp) {
+      const g = ctx.createRadialGradient(mx - 40 * s, y, 4, mx - 40 * s, y, 170 * s);
+      g.addColorStop(0, "rgba(255,181,71,0.26)"); g.addColorStop(1, "rgba(255,181,71,0)");
+      ctx.fillStyle = g; ctx.fillRect(mx - 210 * s, y - 170 * s, 340 * s, 340 * s);
+      ctx.fillStyle = "#555"; ctx.fillRect(mx + 15 * s, y - 2 * s, -50 * s, 4 * s);
+      ctx.fillStyle = "#ffcf85"; ctx.beginPath(); ctx.arc(mx - 36 * s, y, 5 * s, 0, 7); ctx.fill();
+    }
+    // Service-road kerb stones on the left
+    const ko = S ? S.scroll % (40 * s) : 0;
+    for (let y = -40 * s + ko; y < H; y += 40 * s) {
+      ctx.fillStyle = (Math.floor((y - ko) / (40 * s)) % 2) ? "#e8e4d8" : "#2a2c33";
+      ctx.fillRect(road.x - 8 * s, y, 6 * s, 40 * s);
+    }
+  }
+
+  function drawVehicle(v) {
+    const s = road.s, x = v.x - v.w / 2, y = v.y - v.h / 2;
+    // Shadow
+    ctx.fillStyle = "rgba(0,0,0,.35)"; rr(x + 3 * s, y + 5 * s, v.w, v.h, 6 * s); ctx.fill();
+    if (v.kind === "boda") return drawBike(v.x, v.y, v.color, "#333", 0, false);
+    // Body
+    ctx.fillStyle = v.color; rr(x, y, v.w, v.h, (v.kind === "car" ? 9 : 5) * s); ctx.fill();
+    // Headlights glow is ahead (up); tail lights at bottom
+    ctx.fillStyle = "#ff3b3b";
+    ctx.fillRect(x + 3 * s, y + v.h - 4 * s, 7 * s, 3 * s); ctx.fillRect(x + v.w - 10 * s, y + v.h - 4 * s, 7 * s, 3 * s);
+    const tg = ctx.createRadialGradient(v.x, y + v.h, 2, v.x, y + v.h, 26 * s);
+    tg.addColorStop(0, "rgba(255,50,50,.35)"); tg.addColorStop(1, "rgba(255,50,50,0)");
+    ctx.fillStyle = tg; ctx.fillRect(v.x - 30 * s, y + v.h - 10 * s, 60 * s, 40 * s);
+    if (v.kind === "car") {
+      ctx.fillStyle = "#11141b"; rr(x + 4 * s, y + 12 * s, v.w - 8 * s, 12 * s, 3 * s); ctx.fill();
+      rr(x + 5 * s, y + v.h - 18 * s, v.w - 10 * s, 9 * s, 3 * s); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.12)"; rr(x + 5 * s, y + 26 * s, v.w - 10 * s, v.h - 46 * s, 4 * s); ctx.fill();
+    } else if (v.kind === "matatu") {
+      ctx.fillStyle = "#11141b"; rr(x + 4 * s, y + 6 * s, v.w - 8 * s, 12 * s, 3 * s); ctx.fill();
+      // Roof graffiti stripes and the PSV yellow band
+      ctx.fillStyle = "rgba(255,255,255,.18)"; ctx.fillRect(x + 6 * s, y + 24 * s, v.w - 12 * s, 4 * s);
+      ctx.fillStyle = v.color === "#1a1a1a" ? "#f032e6" : "#1a1a1a";
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(x, y + (34 + i * 14) * s); ctx.lineTo(x + v.w, y + (28 + i * 14) * s); ctx.lineTo(x + v.w, y + (32 + i * 14) * s); ctx.lineTo(x, y + (38 + i * 14) * s); ctx.fill(); }
+      ctx.fillStyle = "#f6d21e"; ctx.fillRect(x, y + 18 * s, 3 * s, v.h - 26 * s); ctx.fillRect(x + v.w - 3 * s, y + 18 * s, 3 * s, v.h - 26 * s);
+      // Roof rack
+      ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 1.5 * s; ctx.strokeRect(x + 7 * s, y + v.h - 26 * s, v.w - 14 * s, 16 * s);
+      if (v.blink > 0 && Math.floor(v.blink * 8) % 2) {
+        ctx.fillStyle = "#ffb300";
+        const side = v.tx < v.x ? x - 1 * s : x + v.w - 5 * s;
+        ctx.fillRect(side, y + 2 * s, 6 * s, 5 * s); ctx.fillRect(side, y + v.h - 7 * s, 6 * s, 5 * s);
+      }
+    } else if (v.kind === "truck") {
+      ctx.fillStyle = "#e9e5da"; rr(x, y, v.w, 30 * s, 5 * s); ctx.fill();
+      ctx.fillStyle = "#11141b"; ctx.fillRect(x + 5 * s, y + 4 * s, v.w - 10 * s, 9 * s);
+      ctx.fillStyle = v.color; ctx.fillRect(x + 1 * s, y + 34 * s, v.w - 2 * s, v.h - 36 * s);
+      ctx.strokeStyle = "rgba(0,0,0,.3)"; ctx.lineWidth = 1 * s;
+      for (let i = 1; i < 6; i++) { ctx.beginPath(); ctx.moveTo(x, y + 34 * s + i * (v.h - 36 * s) / 6); ctx.lineTo(x + v.w, y + 34 * s + i * (v.h - 36 * s) / 6); ctx.stroke(); }
+    } else if (v.kind === "bus") {
+      ctx.fillStyle = "#11141b"; rr(x + 4 * s, y + 5 * s, v.w - 8 * s, 12 * s, 3 * s); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.22)";
+      for (let i = 0; i < 4; i++) ctx.fillRect(x + 8 * s, y + (26 + i * 26) * s, v.w - 16 * s, 14 * s);
+    }
+  }
+
+  function drawBike(cx, cy, vest, helmet, lean, player) {
+    const s = road.s;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(lean * 0.35);
+    if (player) {
+      // Headlight beam
+      const g = ctx.createLinearGradient(0, -14 * s, 0, -190 * s);
+      g.addColorStop(0, "rgba(255,244,214,.38)"); g.addColorStop(1, "rgba(255,244,214,0)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-4 * s, -16 * s); ctx.lineTo(-48 * s, -190 * s); ctx.lineTo(48 * s, -190 * s); ctx.lineTo(4 * s, -16 * s); ctx.fill();
+    }
+    ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.fillRect(-5 * s + 3 * s, -16 * s + 4 * s, 10 * s, 34 * s);
+    ctx.fillStyle = "#111"; rr(-3 * s, -17 * s, 6 * s, 9 * s, 2 * s); ctx.fill(); rr(-3 * s, 9 * s, 6 * s, 9 * s, 2 * s); ctx.fill();
+    ctx.fillStyle = "#b8bcc6"; ctx.fillRect(-11 * s, -10 * s, 22 * s, 2.5 * s); // handlebars
+    ctx.fillStyle = "#2b2b2b"; rr(-4.5 * s, -9 * s, 9 * s, 20 * s, 3 * s); ctx.fill();
+    // Rider: vest and helmet
+    ctx.fillStyle = vest; rr(-8 * s, -4 * s, 16 * s, 12 * s, 5 * s); ctx.fill();
+    if (player) { ctx.fillStyle = "#c8c8c8"; ctx.fillRect(-8 * s, 1 * s, 16 * s, 2 * s); }
+    ctx.fillStyle = helmet; ctx.beginPath(); ctx.arc(0, -3 * s, 5 * s, 0, 7); ctx.fill();
+    // Passenger on the back
+    ctx.fillStyle = player ? "#7a3fa0" : "#5a5a5a"; rr(-7 * s, 7 * s, 14 * s, 9 * s, 4 * s); ctx.fill();
+    ctx.fillStyle = "#2d1e14"; ctx.beginPath(); ctx.arc(0, 8 * s, 4 * s, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ff3b3b"; ctx.fillRect(-2 * s, 17 * s, 4 * s, 2 * s);
+    ctx.restore();
+  }
+
+  function drawPickup(e) {
+    const s = road.s;
+    if (e.type === "hole") {
+      ctx.fillStyle = "#0c0d10"; ctx.beginPath(); ctx.ellipse(e.x, e.y, 16 * s, 10 * s, 0.3, 0, 7); ctx.fill();
+      ctx.strokeStyle = "#3a3c44"; ctx.lineWidth = 2 * s; ctx.stroke();
+      return;
+    }
+    const t = performance.now() / 300;
+    const glow = ctx.createRadialGradient(e.x, e.y, 2, e.x, e.y, 26 * s);
+    const col = e.type === "fuel" ? "255,181,71" : "120,230,140";
+    glow.addColorStop(0, `rgba(${col},.45)`); glow.addColorStop(1, `rgba(${col},0)`);
+    ctx.fillStyle = glow; ctx.fillRect(e.x - 30 * s, e.y - 30 * s, 60 * s, 60 * s);
+    if (e.type === "fuel") {
+      ctx.fillStyle = "#d32f2f"; rr(e.x - 9 * s, e.y - 11 * s + Math.sin(t) * 2, 18 * s, 22 * s, 3 * s); ctx.fill();
+      ctx.fillStyle = "#222"; ctx.fillRect(e.x + 2 * s, e.y - 15 * s + Math.sin(t) * 2, 5 * s, 5 * s);
+      ctx.fillStyle = "#fff"; ctx.font = `700 ${10 * s}px ${getComputedStyle(document.body).fontFamily}`; ctx.textAlign = "center"; ctx.fillText("FUEL", e.x, e.y + 4 * s + Math.sin(t) * 2);
+    } else {
+      // A waiting passenger with a raised hand
+      ctx.fillStyle = "#4caf50"; ctx.beginPath(); ctx.arc(e.x, e.y + Math.sin(t) * 2, 9 * s, 0, 7); ctx.fill();
+      ctx.fillStyle = "#06240c"; ctx.font = `700 ${10 * s}px sans-serif`; ctx.textAlign = "center"; ctx.fillText("KSh", e.x, e.y + 3.5 * s + Math.sin(t) * 2);
+    }
+  }
+
+  function drawProps() {
+    const s = road.s;
+    for (const p of S.props) {
+      if (p.kind === "bridge") {
+        // Pedestrian footbridge across the highway
+        ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.fillRect(0, p.y + 14 * s, W, 22 * s);
+        ctx.fillStyle = "#6e7380"; ctx.fillRect(0, p.y, W, 22 * s);
+        ctx.fillStyle = "#8d93a1"; ctx.fillRect(0, p.y, W, 4 * s); ctx.fillRect(0, p.y + 18 * s, W, 4 * s);
+        ctx.fillStyle = "#3a3d45";
+        for (let x = road.x - 30 * s; x < road.x + road.w + 60 * s; x += road.w / 2 + 15 * s) ctx.fillRect(x, p.y - 4 * s, 10 * s, 30 * s);
+      } else if (p.kind === "gantry") {
+        const gw = Math.min(road.w * 0.62, 260), gx = road.x + road.w - gw - 6 * road.s, gh = 46 * s;
+        ctx.fillStyle = "#555a64"; ctx.fillRect(road.x - 20 * s, p.y + gh / 2 - 3 * s, road.w + 50 * s, 6 * s);
+        ctx.fillStyle = "rgba(0,0,0,.4)"; rr(gx + 4 * s, p.y + 6 * s, gw, gh, 4 * s); ctx.fill();
+        ctx.fillStyle = "#0f6b3f"; rr(gx, p.y, gw, gh, 4 * s); ctx.fill();
+        ctx.strokeStyle = "#f4f6f2"; ctx.lineWidth = 2; rr(gx + 3, p.y + 3, gw - 6, gh - 6, 3 * s); ctx.stroke();
+        ctx.fillStyle = "#f4f6f2"; ctx.textAlign = "left";
+        ctx.font = `600 ${Math.max(11, 13 * s)}px "Barlow Condensed", sans-serif`;
+        ctx.fillText(p.dist === TOTAL_KM ? "A2  ▲  END OF ROUTE" : "A2  ▲  THIKA " + Math.round(TOTAL_KM - p.dist) + " km", gx + 10, p.y + 16 * s);
+        ctx.font = `${Math.max(14, 18 * s)}px "Bungee", sans-serif`;
+        ctx.fillText(p.text.toUpperCase(), gx + 10, p.y + 37 * s, gw - 20);
+      }
+    }
+  }
+
+  function draw() {
+    ctx.save();
+    if (S && S.shake > 0) ctx.translate((Math.random() - 0.5) * 10 * S.shake, (Math.random() - 0.5) * 10 * S.shake);
+    drawRoad();
+    if (S) {
+      for (const e of S.ents) if (e.type !== "veh") drawPickup(e);
+      const py = H * 0.76;
+      const blink = S.inv > 0 && Math.floor(S.inv * 10) % 2;
+      for (const e of S.ents) if (e.type === "veh") drawVehicle(e);
+      if (!blink) drawBike(S.x, py, "#c6ff1a", "#f6d21e", S.lean, true);
+      drawProps();
+      // Gentle vignette
+      const vg = ctx.createRadialGradient(W / 2, H * 0.6, H * 0.25, W / 2, H * 0.6, H * 0.85);
+      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.55)");
+      ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
+  }
+
+  function hud() {
+    $("speed").innerHTML = Math.round(S.speed) + "<small>km/h</small>";
+    $("left").innerHTML = Math.max(0, TOTAL_KM - S.km).toFixed(1) + "<small>km</small>";
+    $("cash").innerHTML = S.cash + "<small>KSh</small>";
+    $("fuelBar").style.width = S.fuel + "%";
+    $("fuel").classList.toggle("low", S.fuel < 25);
+    $("lives").textContent = "⛑".repeat(Math.max(0, S.lives)) + "·".repeat(3 - Math.max(0, S.lives));
+    const pct = S.km / TOTAL_KM * 100;
+    $("routeFill").style.width = pct + "%"; $("routeBike").style.left = pct + "%";
+    document.querySelectorAll(".route-tick").forEach(t => t.classList.toggle("passed", +t.dataset.km <= S.km));
+    const nx = ROUTE[Math.min(S.passed + 1, ROUTE.length - 1)];
+    $("next").innerHTML = `Next: <b>${nx.name}</b> · ${(nx.km - S.km).toFixed(1)} km`;
+    if (engine && ac) {
+      engine.frequency.value = 45 + S.speed * 1.1;
+      engineGain.gain.value = running && !paused ? 0.035 : 0;
+    }
+  }
+
+  function loop(t) {
+    const dt = Math.min(0.05, (t - last) / 1000 || 0); last = t;
+    if (running && !paused) { update(dt); if (S) hud(); }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Controls ----------
+  const KEYMAP = { ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right", ArrowUp: "gas", w: "gas", W: "gas", ArrowDown: "brake", s: "brake", S: "brake" };
+  window.addEventListener("keydown", e => {
+    if (KEYMAP[e.key]) { input[KEYMAP[e.key]] = true; e.preventDefault(); }
+    if ((e.key === "p" || e.key === "P" || e.key === "Escape") && running) setPause(!paused);
+    if (e.key === "Enter" && !running) start();
+  });
+  window.addEventListener("keyup", e => { if (KEYMAP[e.key]) input[KEYMAP[e.key]] = false; });
+  function bindPad(id, key) {
+    const el = $(id);
+    const on = e => { e.preventDefault(); input[key] = true; el.classList.add("on"); el.setPointerCapture && el.setPointerCapture(e.pointerId); };
+    const off = e => { input[key] = false; el.classList.remove("on"); };
+    el.addEventListener("pointerdown", on);
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach(n => el.addEventListener(n, off));
+    el.addEventListener("contextmenu", e => e.preventDefault());
+  }
+  bindPad("padL", "left"); bindPad("padR", "right"); bindPad("padG", "gas"); bindPad("padB", "brake");
+
+  function setPause(p) {
+    paused = p; $("pauseScreen").hidden = !p; $("pauseBtn").hidden = p || !running;
+    if (engineGain) engineGain.gain.value = 0;
+  }
+  document.addEventListener("visibilitychange", () => { if (document.hidden && running) setPause(true); });
+  window.addEventListener("blur", () => { if (running) { for (const k in input) input[k] = false; } });
+
+  function start() {
+    initAudio();
+    resize(); newGame();
+    $("startScreen").hidden = true; $("endScreen").hidden = true; $("pauseScreen").hidden = true;
+    running = true; paused = false; $("pauseBtn").hidden = false;
+    toast("Globe Roundabout · Go!", 1300);
+  }
+  $("startBtn").addEventListener("click", start);
+  $("againBtn").addEventListener("click", start);
+  $("resumeBtn").addEventListener("click", () => setPause(false));
+  $("pauseBtn").addEventListener("click", () => { if (running) setPause(true); });
+  // Hooks used by the Android app: back button pauses, app switching pauses
+  window.__onBack = () => { if (running && !paused) { setPause(true); return true; } if (running && paused) { setPause(false); return true; } return false; };
+  window.__appPause = () => { if (running && !paused) setPause(true); };
+
+  // Attract mode behind the start screen: road scrolls gently
+  newGame(); S.speed = 70;
+  const attract = () => { if (!running && S) { S.scroll += 4; } requestAnimationFrame(attract); };
+  attract();
+  hud();
+  requestAnimationFrame(loop);
+})();
+</script>
+
+</html>
